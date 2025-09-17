@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Gerenciador de Gastos IA</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1em; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .container { max-width: 1200px; margin: auto; }
+        #loader { display: none; }
+        
+        .btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-danger {
+            background-color: #f44336; /* Vermelho */
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gerenciador de Gastos com IA</h1>
+        <p>Envie os arquivos PDF das notas fiscais.</p>
+
+        <form id="upload-form">
+            <input type="file" id="pdf-files" name="files" multiple accept=".pdf">
+            <button type="submit">Processar Arquivos</button>
+        </form>
+
+        <div id="loader">Processando...</div>
+
+        <hr>
+
+        <h2>Resultados para Validação</h2>
+        <div id="results-table-container"></div>
+        <button id="save-button" style="display:none;" onclick="salvarDados()">Salvar e Treinar IA</button>
+        
+        <hr>
+
+        <section>
+            <h2>Exportar Dados e Resetar</h2>
+            <p>Baixe a planilha com todos os seus gastos ou resete o sistema para começar um novo ciclo.</p>
+            <div style="display: flex; gap: 10px;">
+                <button id="btnExportarDados" class="btn">Baixar Planilha</button>
+                <button id="btnResetarPlanilha" class="btn-danger">Resetar Planilha</button>
+            </div>
+        </section>
+        
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('upload-form');
+        const loader = document.getElementById('loader');
+        const resultsContainer = document.getElementById('results-table-container');
+        const saveButton = document.getElementById('save-button');
+        
+        let currentData = [];
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            loader.style.display = 'block';
+            resultsContainer.innerHTML = '';
+            saveButton.style.display = 'none';
+
+            const formData = new FormData();
+            const filesInput = document.getElementById('pdf-files');
+            for (const file of filesInput.files) {
+                formData.append('files', file);
+            }
+
+            const response = await fetch('/upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            loader.style.display = 'none';
+            if (response.ok) {
+                const results = await response.json();
+                currentData = results;
+                displayResults(results);
+            } else {
+                alert('Ocorreu um erro no processamento.');
+            }
+        });
+
+        function displayResults(results) {
+            if (results.length === 0) return;
+
+            const categorias = ['Fornecedores', 'Impostos', 'Material de Escritório', 'Alimentação', 'Transporte', 'Outros'];
+
+            let table = '<table><tr><th>Arquivo</th><th>Valor</th><th>Data</th><th>Descrição (Amostra)</th><th>Categoria (Previsão da IA)</th></tr>';
+            
+            results.forEach((item, index) => {
+                let optionsHtml = '';
+                categorias.forEach(cat => {
+                    const selected = cat === item.categoria_prevista ? 'selected' : '';
+                    optionsHtml += `<option value="${cat}" ${selected}>${cat}</option>`;
+                });
+
+                table += `
+                    <tr>
+                        <td>${item.arquivo}</td>
+                        <td><input type="text" id="valor-${index}" value="${item.valor}"></td>
+                        <td><input type="text" id="data-${index}" value="${item.data}"></td>
+                        <td>
+                            <input type="text" id="desc-limpa-${index}" value="${item.descricao_exibir}" style="width: 95%;">
+                            <textarea id="desc-completa-${index}" style="display: none;">${item.texto_completo}</textarea>
+                        </td>
+                        <td><select id="cat-${index}">${optionsHtml}</select></td>
+                    </tr>
+                `;
+            });
+            table += '</table>';
+            
+            resultsContainer.innerHTML = table;
+            saveButton.style.display = 'block';
+        }
+
+        async function salvarDados() {
+            const dataToSave = [];
+            currentData.forEach((item, index) => {
+                dataToSave.push({
+                    'Arquivo': item.arquivo,
+                    'Valor': document.getElementById(`valor-${index}`).value,
+                    'Data': document.getElementById(`data-${index}`).value,
+                    'Descricao': document.getElementById(`desc-limpa-${index}`).value,
+                    'DescricaoCompleta': document.getElementById(`desc-completa-${index}`).value,
+                    'Categoria': document.getElementById(`cat-${index}`).value
+                });
+            });
+
+            const response = await fetch('/salvar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: dataToSave })
+            });
+
+            if(response.ok) {
+                const result = await response.json();
+                alert(result.success);
+                resultsContainer.innerHTML = '';
+                saveButton.style.display = 'none';
+            } else {
+                alert('Erro ao salvar os dados.');
+            }
+        }
+        
+        document.getElementById('btnExportarDados').addEventListener('click', () => {
+            window.location.href = '/exportar';
+        });
+
+        document.getElementById('btnResetarPlanilha').addEventListener('click', async () => {
+            if (confirm('Tem certeza que deseja resetar a planilha e o modelo da IA? Esta ação é irreversível.')) {
+                try {
+                    const response = await fetch('/resetar', { method: 'POST' });
+                    const result = await response.json();
+                    if (response.ok) {
+                        alert(result.success);
+                        window.location.reload(); 
+                    } else {
+                        alert(`Erro ao resetar: ${result.error}`);
+                    }
+                } catch (error) {
+                    alert('Erro ao se comunicar com o servidor.');
+                }
+            }
+        });
+    </script>
+</body>
+</html>
